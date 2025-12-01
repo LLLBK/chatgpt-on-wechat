@@ -92,6 +92,12 @@ available_setting = {
     "dashscope_api_key": "",
     # Google Gemini Api Key
     "gemini_api_key": "",
+    "gemini_attachment_cache_seconds": 900,  # 附件缓存时间，单位秒
+    "gemini_attachment_max_size": 10 * 1024 * 1024,  # 单个附件大小上限，单位字节，默认10MB
+    # Nano Banana 图片模型
+    "nano_banana_api_key": "",
+    "nano_banana_api_base": "",
+    "nano_banana_model": "nano-banana",
     # wework的通用配置
     "wework_smart": True,  # 配置wework是否使用已登录的企业微信，False为多开
     # 语音设置
@@ -154,7 +160,7 @@ available_setting = {
     "dingtalk_card_enabled": False,
     
     # chatgpt指令自定义触发词
-    "clear_memory_commands": ["#清除记忆"],  # 重置会话指令，必须以#开头
+    "clear_memory_commands": ["#清除记忆", "清空对话", "#清空对话"],  # 重置会话指令，允许自然语言
     # channel配置
     "channel_type": "",  # 通道类型，支持：{wx,wxy,terminal,wechatmp,wechatmp_service,wechatcom_app,dingtalk}
     "subscribe_msg": "",  # 订阅消息, 支持: wechatmp, wechatmp_service, wechatcom_app
@@ -183,6 +189,8 @@ available_setting = {
     "Minimax_group_id": "",
     "Minimax_base_url": "",
     "web_port": 9899,
+    # 本地敏感词过滤（输出安全），可根据需要扩展
+    "sensitive_block_words": ["当代中国政治", "中国政治", "中国共产党", "政治局", "总书记"],
 }
 
 
