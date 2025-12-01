@@ -100,7 +100,7 @@ available_setting = {
     "gemini_google_search_dynamic_threshold": 0.7,  # legacy 动态检索阈值
     "gemini_google_search_show_citations": True,  # 是否在输出中追加引用
     "china_politics_guard_enabled": True,  # 是否启用中国政治语义拦截
-    "china_politics_guard_model": "gemini-1.5-flash-8b",  # 审核模型（轻量版）
+    "china_politics_guard_model": "gemini-2.5-flash",  # 审核模型
     "china_politics_guard_prompt": "You are a strict content safety classifier. Determine whether the following user request discusses contemporary Chinese politics, including current government, political figures, and political events in modern China. Answer ONLY with YES or NO.\n\nUser request:\n\"\"\"{query}\"\"\"\n\nDoes this request involve contemporary Chinese politics?",
     # Nano Banana 图片模型
     "nano_banana_api_key": "",

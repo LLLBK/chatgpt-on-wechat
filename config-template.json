@@ -1,11 +1,19 @@
 {
-  "channel_type": "web",
-  "model": "",
-  "open_ai_api_key": "YOUR API KEY",
-  "claude_api_key": "YOUR API KEY",
-  "text_to_image": "dall-e-2",
-  "voice_to_text": "openai",
-  "text_to_voice": "openai",
+  "channel_type": "wcf",
+  "model": "gemini-3-pro-preview",
+  "gemini_api_key": "YOUR_GOOGLE_AI_KEY",
+  "gemini_enable_google_search": true,
+  "gemini_google_search_tool": "google_search",
+  "gemini_google_search_mode": "MODE_DYNAMIC",
+  "gemini_google_search_show_citations": true,
+  "gemini_attachment_cache_seconds": 900,
+  "gemini_attachment_max_size": 10485760,
+  "nano_banana_api_key": "YOUR_GOOGLE_AI_KEY",
+  "nano_banana_api_base": "https://generativelanguage.googleapis.com/v1beta",
+  "nano_banana_model": "gemini-3-pro-image-preview",
+  "text_to_image": "gemini-3-pro-image-preview",
+  "voice_to_text": "google",
+  "text_to_voice": "google",
   "proxy": "",
   "hot_reload": false,
   "single_chat_prefix": [
@@ -17,20 +25,22 @@
     "@bot"
   ],
   "group_name_white_list": [
-    "ChatGPT测试群",
-    "ChatGPT测试群2"
+    "Gemini助手测试群"
   ],
   "image_create_prefix": [
-    "画"
+    "画",
+    "生成图片"
   ],
   "speech_recognition": true,
   "group_speech_recognition": false,
   "voice_reply_voice": false,
   "conversation_max_tokens": 2500,
   "expires_in_seconds": 3600,
-  "character_desc": "你是基于大语言模型的AI智能助手，旨在回答并解决人们的任何问题，并且可以使用多种语言与人交流。",
+  "character_desc": "你是Google AI Gemini套件驱动的智能助手，擅长多轮对话、文件解析和图像生成，请始终保持专业友好的语气。",
   "temperature": 0.7,
-  "subscribe_msg": "感谢您的关注！\n这里是AI智能助手，可以自由对话。\n支持语音对话。\n支持图片输入。\n支持图片输出，画字开头的消息将按要求创作图片。\n支持tool、角色扮演和文字冒险等丰富的插件。\n输入{trigger_prefix}#help 查看详细指令。",
+  "subscribe_msg": "欢迎使用基于Google AI Gemini的智能助手！\n支持文本对话、语音输入、文件/图片理解以及Nano Banana Pro图像生成。\n输入{trigger_prefix}#help 查看指令。",
+  "china_politics_guard_enabled": true,
+  "china_politics_guard_model": "gemini-1.5-flash-8b",
   "use_linkai": false,
   "linkai_api_key": "",
   "linkai_app_code": ""

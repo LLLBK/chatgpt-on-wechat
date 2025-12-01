@@ -6,17 +6,18 @@ Google gemini bot
 """
 # encoding:utf-8
 
+import base64
 import os
 import mimetypes
+import uuid
 
-import requests
 from bot.bot import Bot
 import google.generativeai as genai
 from bot.session_manager import SessionManager
 from bridge.context import ContextType, Context
 from bridge.reply import Reply, ReplyType
 from common.log import logger
-from config import conf
+from config import conf, get_appdata_dir
 from common.expired_dict import ExpiredDict
 from common.safety import sensitive_filter
 from bot.chatgpt.chat_gpt_session import ChatGPTSession
@@ -38,8 +39,6 @@ class GoogleGeminiBot(Bot):
         self.attachment_ttl = conf().get("gemini_attachment_cache_seconds", 900)
         self.attachment_max_size = conf().get("gemini_attachment_max_size", 10 * 1024 * 1024)
         self.pending_attachments = ExpiredDict(self.attachment_ttl) if self.attachment_ttl else {}
-        self.nano_banana_key = conf().get("nano_banana_api_key")
-        self.nano_banana_base = conf().get("nano_banana_api_base") or "https://api.nano-banana.com/v1"
         self.nano_banana_model = conf().get("nano_banana_model") or "nano-banana"
         self.google_search_enabled = conf().get("gemini_enable_google_search", False)
         search_tool_conf = (conf().get("gemini_google_search_tool") or "auto").strip().lower()
@@ -62,7 +61,7 @@ class GoogleGeminiBot(Bot):
         if self.google_search_tools:
             logger.info(f"[Gemini] Google Search tool enabled: {self.google_search_tool}")
         self.china_guard_enabled = conf().get("china_politics_guard_enabled", True)
-        self.china_guard_model = conf().get("china_politics_guard_model", "gemini-1.5-flash-8b")
+        self.china_guard_model = conf().get("china_politics_guard_model", "gemini-2.5-flash")
         self.china_guard_prompt = conf().get("china_politics_guard_prompt") or (
             "You are a strict content safety classifier. Determine whether the following user request discusses contemporary Chinese politics, including current government, political figures, and political events in modern China. Answer ONLY with YES or NO.\n\nUser request:\n\"\"\"{query}\"\"\"\n\nDoes this request involve contemporary Chinese politics?"
         )
@@ -336,44 +335,23 @@ class GoogleGeminiBot(Bot):
         return any(kw in query for kw in keywords)
 
     def _handle_image_generation(self, prompt: str, attachments: list, session_id):
-        if not self.nano_banana_key:
-            return Reply(ReplyType.ERROR, "未配置 Nano Banana API Key，无法生成图片。")
-        files = []
-        for att in attachments or []:
-            path = att.get("path")
-            if not path or not os.path.exists(path):
-                continue
-            mime = att.get("mime_type") or mimetypes.guess_type(path)[0] or "application/octet-stream"
-            try:
-                files.append(
-                    ("images", (att.get("file_name") or os.path.basename(path), open(path, "rb"), mime))
-                )
-            except Exception as e:
-                logger.warning(f"[Gemini] attach reference image failed: {e}")
-                continue
-        headers = {"Authorization": f"Bearer {self.nano_banana_key}"}
-        data = {
-            "prompt": prompt or "请根据描述生成一张图片",
-            "model": self.nano_banana_model,
-        }
+        prompt_text = prompt or "请根据描述生成一张图片"
         try:
-            resp = requests.post(
-                f"{self.nano_banana_base.rstrip('/')}/images/generations",
-                headers=headers,
-                data=data,
-                files=files if files else None,
-                timeout=60,
+            model = genai.GenerativeModel(self.nano_banana_model)
+            parts = []
+            for att in attachments or []:
+                part = self._attachment_to_part(att)
+                if part:
+                    parts.append(part)
+            parts.append({"text": prompt_text})
+            response = model.generate_content(
+                parts,
+                generation_config={"response_mime_type": "image/png"},
             )
-            resp.raise_for_status()
-            result = resp.json()
-            url = None
-            if isinstance(result, dict):
-                data_field = result.get("data")
-                if isinstance(data_field, list) and data_field:
-                    url = data_field[0].get("url")
-                url = url or result.get("url")
-            if url:
-                return Reply(ReplyType.IMAGE_URL, url)
+            image_paths = self._extract_image_paths(response)
+            if image_paths:
+                return Reply(ReplyType.IMAGE, image_paths[0])
+            logger.warning("[Gemini] image generation succeeded but no images returned.")
             return Reply(ReplyType.ERROR, "图片生成失败，未获取到结果。")
         except Exception as e:
             logger.error(f"[Gemini] Nano Banana request failed: {e}", exc_info=True)
@@ -406,3 +384,53 @@ class GoogleGeminiBot(Bot):
         except Exception as e:
             logger.error(f"[Gemini] guard check failed: {e}", exc_info=True)
             return True
+
+    def _extract_image_paths(self, response):
+        image_paths = []
+        candidates = getattr(response, "candidates", []) or []
+        for candidate in candidates:
+            content = getattr(candidate, "content", None)
+            if not content:
+                continue
+            parts = getattr(content, "parts", []) or []
+            for part in parts:
+                inline_data = getattr(part, "inline_data", None) or (part.get("inline_data") if isinstance(part, dict) else None)
+                if not inline_data:
+                    continue
+                data = getattr(inline_data, "data", None) or inline_data.get("data")
+                if not data:
+                    continue
+                if isinstance(data, str):
+                    try:
+                        binary = base64.b64decode(data)
+                    except Exception as e:
+                        logger.warning(f"[Gemini] decode image failed: {e}")
+                        continue
+                else:
+                    binary = data
+                mime_type = getattr(inline_data, "mime_type", None) or inline_data.get("mime_type") or "image/png"
+                path = self._save_image_bytes(binary, mime_type)
+                if path:
+                    image_paths.append(path)
+        return image_paths
+
+    def _save_image_bytes(self, data: bytes, mime_type: str):
+        ext = self._mime_to_ext(mime_type)
+        directory = os.path.join(get_appdata_dir(), "generated_images")
+        os.makedirs(directory, exist_ok=True)
+        file_path = os.path.join(directory, f"{uuid.uuid4().hex}.{ext}")
+        try:
+            with open(file_path, "wb") as f:
+                f.write(data)
+            return file_path
+        except Exception as e:
+            logger.error(f"[Gemini] save image failed: {e}")
+            return None
+
+    def _mime_to_ext(self, mime_type: str):
+        mapping = {
+            "image/png": "png",
+            "image/jpeg": "jpg",
+            "image/webp": "webp"
+        }
+        return mapping.get(mime_type, "png")
