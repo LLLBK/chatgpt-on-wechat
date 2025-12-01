@@ -420,10 +420,15 @@ API Key创建：在 [控制台](https://aistudio.google.com/app/apikey?hl=zh-cn)
 ```json
 {
     "model": "gemini-2.5-pro",
-    "gemini_api_key": ""
+    "gemini_api_key": "",
+    "gemini_enable_google_search": true
 }
 ```
  - `model`: 参考[官方文档-模型列表](https://ai.google.dev/gemini-api/docs/models?hl=zh-cn)
+ - `gemini_enable_google_search`：可选配置，开启后会按照[Google Search Grounding 指南](https://ai.google.dev/gemini-api/docs/google-search)自动让模型联网搜索，优先使用 `google_search` 工具。如果模型为 1.5，会自动切换为 `google_search_retrieval` 并根据 `gemini_google_search_mode` 与 `gemini_google_search_dynamic_threshold` 控制动态检索阈值。
+ - `gemini_google_search_show_citations`：可选配置（默认 `true`），控制是否将 Search 返回的引用链接插入到模型输出中。
+ - `gemini_google_search_tool`：可选配置，取值 `google_search`、`google_search_retrieval` 或 `auto`（默认），用于手动指定搜索工具。
+ - `gemini_google_search_dynamic_threshold`：可选配置，仅 `google_search_retrieval` 模式下生效，默认 `0.7`。
 </details>
 
 <details>

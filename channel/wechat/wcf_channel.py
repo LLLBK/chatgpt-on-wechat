@@ -6,12 +6,14 @@ wechat channel
 
 import io
 import json
+import mimetypes
 import os
 import threading
 import time
 from queue import Empty
 from typing import Any
 
+import requests
 from bridge.context import *
 from bridge.reply import *
 from channel.chat_channel import ChatChannel
@@ -88,9 +90,11 @@ class WechatfChannel(ChatChannel):
             self._clean_expired_msgs()
 
             logger.debug(f"收到消息: {msg}")
+            attachments = self._build_attachments(cmsg)
             context = self._compose_context(cmsg.ctype, cmsg.content,
                                             isgroup=cmsg.is_group,
-                                            msg=cmsg)
+                                            msg=cmsg,
+                                            attachments=attachments)
             if context:
                 self.produce(context)
         except Exception as e:
@@ -126,6 +130,14 @@ class WechatfChannel(ChatChannel):
 
             elif reply.type == ReplyType.ERROR or reply.type == ReplyType.INFO:
                 self.wcf.send_text(reply.content, receiver)
+            elif reply.type == ReplyType.IMAGE:
+                self._send_image(reply.content, receiver)
+            elif reply.type == ReplyType.IMAGE_URL:
+                path = self._download_remote_file(reply.content, suffix="jpg")
+                if path:
+                    self._send_image(path, receiver)
+            elif reply.type == ReplyType.FILE or reply.type == ReplyType.VIDEO or reply.type == ReplyType.VOICE:
+                self._send_file(reply.content, receiver)
             else:
                 logger.error(f"暂不支持的消息类型: {reply.type}")
 
@@ -140,6 +152,55 @@ class WechatfChannel(ChatChannel):
             self.wcf.cleanup()
         except Exception as e:
             logger.error(f"关闭通道失败: {e}")
+
+    def _build_attachments(self, cmsg: WechatfMessage):
+        if cmsg.ctype == ContextType.TEXT:
+            return []
+        try:
+            cmsg.prepare()
+        except Exception as e:
+            logger.warning(f"[WCF] prepare media failed: {e}")
+        meta = {}
+        if cmsg.content:
+            meta["path"] = cmsg.content
+            meta["file_name"] = getattr(cmsg, "file_name", None) or os.path.basename(cmsg.content)
+            meta["mime_type"] = mimetypes.guess_type(cmsg.content)[0]
+            meta["type"] = cmsg.ctype
+            try:
+                meta["size"] = os.path.getsize(cmsg.content)
+            except Exception:
+                meta["size"] = None
+        return [meta] if meta else []
+
+    def _send_image(self, path: str, receiver: str):
+        if hasattr(self.wcf, "send_image"):
+            self.wcf.send_image(path, receiver)
+        elif hasattr(self.wcf, "send_file"):
+            # 退化为发送文件
+            self.wcf.send_file(path, receiver)
+        else:
+            logger.error("当前wcf版本不支持发送图片/文件")
+
+    def _send_file(self, path: str, receiver: str):
+        if hasattr(self.wcf, "send_file"):
+            self.wcf.send_file(path, receiver)
+        else:
+            logger.error("当前wcf版本不支持发送文件")
+
+    def _download_remote_file(self, url: str, suffix: str = "tmp"):
+        try:
+            resp = requests.get(url, timeout=10)
+            resp.raise_for_status()
+            data_dir = os.path.join(get_appdata_dir(), "wcf_attachments")
+            os.makedirs(data_dir, exist_ok=True)
+            filename = f"download_{int(time.time())}.{suffix}"
+            path = os.path.join(data_dir, filename)
+            with open(path, "wb") as f:
+                f.write(resp.content)
+            return path
+        except Exception as e:
+            logger.error(f"[WCF] download remote file failed: {e}")
+            return None
 
 
 class ContactCache:

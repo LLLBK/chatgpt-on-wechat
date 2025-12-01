@@ -224,10 +224,13 @@ class ChatChannel(Channel):
                     "path": context.content,
                     "msg": context.get("msg")
                 }
+                context["channel"] = e_context["channel"]
+                reply = super().build_reply_content(context.content, context)
             elif context.type == ContextType.SHARING:  # 分享信息，当前无默认逻辑
                 pass
-            elif context.type == ContextType.FUNCTION or context.type == ContextType.FILE:  # 文件消息及函数调用等，当前无默认逻辑
-                pass
+            elif context.type == ContextType.FUNCTION or context.type == ContextType.FILE or context.type == ContextType.VIDEO:  # 文件/视频消息及函数调用
+                context["channel"] = e_context["channel"]
+                reply = super().build_reply_content(context.content, context)
             else:
                 logger.warning("[chat_channel] unknown context type: {}".format(context.type))
                 return
@@ -283,7 +286,9 @@ class ChatChannel(Channel):
             reply = e_context["reply"]
             if not e_context.is_pass() and reply and reply.type:
                 logger.debug("[chat_channel] ready to send reply: {}, context: {}".format(reply, context))
-                self._send(reply, context)
+                replies = self._split_reply_if_needed(reply)
+                for part in replies:
+                    self._send(part, context)
 
     def _send(self, reply: Reply, context: Context, retry_cnt=0):
         try:
@@ -380,6 +385,37 @@ class ChatChannel(Channel):
                 if cnt > 0:
                     logger.info("Cancel {} messages in session {}".format(cnt, session_id))
                 self.sessions[session_id][0] = Dequeue()
+
+    def _split_reply_if_needed(self, reply: Reply):
+        if reply.type != ReplyType.TEXT or not isinstance(reply.content, str):
+            return [reply]
+        text = reply.content
+        limit = self._get_text_limit(text)
+        if len(text) <= limit:
+            return [reply]
+        parts = []
+        start = 0
+        text_len = len(text)
+        while start < text_len:
+            end = min(text_len, start + limit)
+            parts.append(text[start:end])
+            start = end
+        replies = []
+        for part in parts:
+            new_reply = Reply(reply.type, part)
+            replies.append(new_reply)
+        logger.info(f"[chat_channel] split reply into {len(replies)} parts due to length limit {limit}")
+        return replies
+
+    def _get_text_limit(self, text: str) -> int:
+        if not text:
+            return 5000
+        ascii_only = True
+        for ch in text:
+            if ord(ch) > 127:
+                ascii_only = False
+                break
+        return 10000 if ascii_only else 5000
 
 
 def check_prefix(content, prefix_list):

@@ -41,6 +41,31 @@ class GoogleGeminiBot(Bot):
         self.nano_banana_key = conf().get("nano_banana_api_key")
         self.nano_banana_base = conf().get("nano_banana_api_base") or "https://api.nano-banana.com/v1"
         self.nano_banana_model = conf().get("nano_banana_model") or "nano-banana"
+        self.google_search_enabled = conf().get("gemini_enable_google_search", False)
+        search_tool_conf = (conf().get("gemini_google_search_tool") or "auto").strip().lower()
+        if search_tool_conf not in ("auto", "google_search", "google_search_retrieval"):
+            search_tool_conf = "auto"
+        if search_tool_conf == "auto":
+            if "1.5" in self.model:
+                search_tool_conf = "google_search_retrieval"
+            else:
+                search_tool_conf = "google_search"
+        self.google_search_tool = search_tool_conf
+        mode_conf = (conf().get("gemini_google_search_mode") or "MODE_DYNAMIC").upper()
+        self.google_search_mode = mode_conf
+        try:
+            self.google_search_threshold = float(conf().get("gemini_google_search_dynamic_threshold", 0.7))
+        except (TypeError, ValueError):
+            self.google_search_threshold = 0.7
+        self.google_search_show_citations = conf().get("gemini_google_search_show_citations", True)
+        self.google_search_tools = self._build_google_search_tools()
+        if self.google_search_tools:
+            logger.info(f"[Gemini] Google Search tool enabled: {self.google_search_tool}")
+        self.china_guard_enabled = conf().get("china_politics_guard_enabled", True)
+        self.china_guard_model = conf().get("china_politics_guard_model", "gemini-1.5-flash-8b")
+        self.china_guard_prompt = conf().get("china_politics_guard_prompt") or (
+            "You are a strict content safety classifier. Determine whether the following user request discusses contemporary Chinese politics, including current government, political figures, and political events in modern China. Answer ONLY with YES or NO.\n\nUser request:\n\"\"\"{query}\"\"\"\n\nDoes this request involve contemporary Chinese politics?"
+        )
 
     def reply(self, query, context: Context = None) -> Reply:
         try:
@@ -68,11 +93,14 @@ class GoogleGeminiBot(Bot):
                 return Reply(ReplyType.TEXT, None)
 
             logger.info(f"[Gemini] query={normalized_query}")
+            # Configure API client upfront for guard/model calls
+            genai.configure(api_key=self.api_key)
+            if self.china_guard_enabled and self._violates_china_politics_policy(normalized_query):
+                return Reply(ReplyType.ERROR, "抱歉，该请求无法处理。")
             attachments = self._pop_attachments(session_id)
             session = self.sessions.session_query(normalized_query, session_id)
             gemini_messages = self._convert_to_gemini_messages(self.filter_messages(session.messages), attachments)
             logger.debug(f"[Gemini] messages={gemini_messages}")
-            genai.configure(api_key=self.api_key)
             model = genai.GenerativeModel(self.model)
 
             # 添加安全设置
@@ -84,12 +112,18 @@ class GoogleGeminiBot(Bot):
             }
 
             # 生成回复，包含安全设置
+            request_args = {
+                "safety_settings": safety_settings
+            }
+            if self.google_search_tools:
+                request_args["tools"] = self.google_search_tools
             response = model.generate_content(
                 gemini_messages,
-                safety_settings=safety_settings
+                **request_args
             )
             if response.candidates and response.candidates[0].content:
-                reply_text = response.candidates[0].content.parts[0].text
+                reply_text = getattr(response, "text", None) or response.candidates[0].content.parts[0].text
+                reply_text = self._append_grounding_citations(response, reply_text)
                 ok, filtered_text = sensitive_filter.filter(reply_text)
                 if not ok:
                     reply_text = filtered_text
@@ -141,6 +175,84 @@ class GoogleGeminiBot(Bot):
                 "parts": parts
             })
         return res
+
+    def _build_google_search_tools(self):
+        if not self.google_search_enabled:
+            return None
+        if self.google_search_tool == "google_search_retrieval":
+            dynamic_config = {"mode": self.google_search_mode or "MODE_DYNAMIC"}
+            if dynamic_config["mode"] == "MODE_DYNAMIC" and self.google_search_threshold is not None:
+                threshold = max(0.0, min(1.0, float(self.google_search_threshold)))
+                dynamic_config["dynamic_threshold"] = threshold
+            return [{
+                "google_search_retrieval": {
+                    "dynamic_retrieval_config": dynamic_config
+                }
+            }]
+        return [{"google_search": {}}]
+
+    def _append_grounding_citations(self, response, text: str) -> str:
+        if not text or not self.google_search_enabled or not self.google_search_show_citations:
+            return text
+        try:
+            candidates = getattr(response, "candidates", None)
+            if not candidates:
+                return text
+            candidate = candidates[0]
+            metadata = self._maybe_get(candidate, "grounding_metadata", "groundingMetadata")
+            if not metadata:
+                return text
+            supports = self._maybe_get(metadata, "grounding_supports", "groundingSupports") or []
+            chunks = self._maybe_get(metadata, "grounding_chunks", "groundingChunks") or []
+            if not supports or not chunks:
+                return text
+            sorted_supports = sorted(
+                list(supports),
+                key=lambda s: self._maybe_get(self._maybe_get(s, "segment"), "end_index", "endIndex") or 0,
+                reverse=True
+            )
+            text_with_citations = text
+            chunks_list = list(chunks)
+            for support in sorted_supports:
+                segment = self._maybe_get(support, "segment")
+                end_index = self._maybe_get(segment, "end_index", "endIndex")
+                if end_index is None:
+                    continue
+                chunk_indices = self._maybe_get(support, "grounding_chunk_indices", "groundingChunkIndices") or []
+                citation_links = []
+                for idx in chunk_indices:
+                    if not isinstance(idx, int) or idx < 0 or idx >= len(chunks_list):
+                        continue
+                    chunk = chunks_list[idx]
+                    web_info = self._maybe_get(chunk, "web")
+                    uri = self._maybe_get(web_info, "uri")
+                    if uri:
+                        citation_links.append(f"[{idx + 1}]({uri})")
+                if not citation_links:
+                    continue
+                end_index = max(0, min(int(end_index), len(text_with_citations)))
+                citation_string = ", ".join(citation_links)
+                text_with_citations = text_with_citations[:end_index] + citation_string + text_with_citations[end_index:]
+            return text_with_citations
+        except Exception as e:
+            logger.warning(f"[Gemini] append citations failed: {e}")
+            return text
+
+    @staticmethod
+    def _maybe_get(obj, *keys):
+        if obj is None:
+            return None
+        for key in keys:
+            if not key:
+                continue
+            value = None
+            if isinstance(obj, dict):
+                value = obj.get(key)
+            else:
+                value = getattr(obj, key, None)
+            if value is not None:
+                return value
+        return None
 
     @staticmethod
     def filter_messages(messages: list):
@@ -266,3 +378,31 @@ class GoogleGeminiBot(Bot):
         except Exception as e:
             logger.error(f"[Gemini] Nano Banana request failed: {e}", exc_info=True)
             return Reply(ReplyType.ERROR, "调用图片生成接口失败，请稍后再试。")
+
+    def _violates_china_politics_policy(self, query: str) -> bool:
+        if not query or not self.china_guard_model:
+            return False
+        guard_prompt = self.china_guard_prompt.format(query=query)
+        try:
+            guard_model = genai.GenerativeModel(self.china_guard_model)
+            response = guard_model.generate_content(guard_prompt)
+            verdict = ""
+            if hasattr(response, "text") and response.text:
+                verdict = response.text
+            elif getattr(response, "candidates", None):
+                candidate = response.candidates[0]
+                content = getattr(candidate, "content", None)
+                if content and getattr(content, "parts", None):
+                    verdict = content.parts[0].text
+            verdict = (verdict or "").strip().lower()
+            if verdict.startswith("yes"):
+                logger.warning("[Gemini] request blocked by China politics policy")
+                return True
+            if verdict.startswith("no"):
+                return False
+            # 未能解析明确答案时默认拦截
+            logger.warning(f"[Gemini] guard indeterminate verdict: {verdict}")
+            return True
+        except Exception as e:
+            logger.error(f"[Gemini] guard check failed: {e}", exc_info=True)
+            return True

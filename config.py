@@ -94,6 +94,14 @@ available_setting = {
     "gemini_api_key": "",
     "gemini_attachment_cache_seconds": 900,  # 附件缓存时间，单位秒
     "gemini_attachment_max_size": 10 * 1024 * 1024,  # 单个附件大小上限，单位字节，默认10MB
+    "gemini_enable_google_search": False,  # 是否启用Google Search工具
+    "gemini_google_search_tool": "auto",  # google_search 或 google_search_retrieval 或 auto
+    "gemini_google_search_mode": "MODE_DYNAMIC",  # legacy 检索模式
+    "gemini_google_search_dynamic_threshold": 0.7,  # legacy 动态检索阈值
+    "gemini_google_search_show_citations": True,  # 是否在输出中追加引用
+    "china_politics_guard_enabled": True,  # 是否启用中国政治语义拦截
+    "china_politics_guard_model": "gemini-1.5-flash-8b",  # 审核模型（轻量版）
+    "china_politics_guard_prompt": "You are a strict content safety classifier. Determine whether the following user request discusses contemporary Chinese politics, including current government, political figures, and political events in modern China. Answer ONLY with YES or NO.\n\nUser request:\n\"\"\"{query}\"\"\"\n\nDoes this request involve contemporary Chinese politics?",
     # Nano Banana 图片模型
     "nano_banana_api_key": "",
     "nano_banana_api_base": "",
