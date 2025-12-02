@@ -34,7 +34,7 @@ anthropic==0.25.0
 broadscope_bailian
 
 # google
-google-generativeai
+google-genai
 
 # dingtalk
 dingtalk_stream

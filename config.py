@@ -92,6 +92,15 @@ available_setting = {
     "dashscope_api_key": "",
     # Google Gemini Api Key
     "gemini_api_key": "",
+    "gemini_fallback_model": "gemini-1.5-pro-latest",
+    "gemini_image_model": "gemini-3-pro-image-preview",
+    "gemini_image_fallback_model": "gemini-1.5-flash-latest",
+    "gemini_max_output_tokens": 65536,
+    "gemini_thinking_level": "HIGH",
+    "gemini_http_timeout": None,
+    "gemini_http_retry_attempts": None,
+    "gemini_http_trust_env": True,
+    "gemini_max_tool_calls": 5,
     "gemini_attachment_cache_seconds": 900,  # 附件缓存时间，单位秒
     "gemini_attachment_max_size": 10 * 1024 * 1024,  # 单个附件大小上限，单位字节，默认10MB
     "gemini_enable_google_search": False,  # 是否启用Google Search工具
@@ -102,10 +111,6 @@ available_setting = {
     "china_politics_guard_enabled": True,  # 是否启用中国政治语义拦截
     "china_politics_guard_model": "gemini-2.5-flash",  # 审核模型
     "china_politics_guard_prompt": "You are a strict content safety classifier. Determine whether the following user request discusses contemporary Chinese politics, including current government, political figures, and political events in modern China. Answer ONLY with YES or NO.\n\nUser request:\n\"\"\"{query}\"\"\"\n\nDoes this request involve contemporary Chinese politics?",
-    # Nano Banana 图片模型
-    "nano_banana_api_key": "",
-    "nano_banana_api_base": "",
-    "nano_banana_model": "nano-banana",
     # wework的通用配置
     "wework_smart": True,  # 配置wework是否使用已登录的企业微信，False为多开
     # 语音设置
@@ -259,6 +264,34 @@ class Config(dict):
 config = Config()
 
 
+def _load_env_file(env_file=".env"):
+    """
+    Load key=value pairs from a local .env file so secrets stay outside version control.
+    Existing environment variables take precedence over the .env entries.
+    """
+    try:
+        root_dir = os.path.dirname(os.path.abspath(__file__))
+        env_path = os.path.join(root_dir, env_file)
+        if not os.path.exists(env_path):
+            return
+        with open(env_path, "r", encoding="utf-8") as f:
+            for raw_line in f:
+                line = raw_line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, value = line.split("=", 1)
+                key = key.strip()
+                if not key:
+                    continue
+                value = value.strip()
+                if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
+                    value = value[1:-1]
+                os.environ.setdefault(key, value)
+        logger.info("[INIT] Local .env file loaded.")
+    except Exception as e:
+        logger.warning(f"[INIT] Failed to load .env file: {e}")
+
+
 def drag_sensitive(config):
     try:
         if isinstance(config, str):
@@ -285,6 +318,7 @@ def drag_sensitive(config):
 
 def load_config():
     global config
+    _load_env_file()
     config_path = "./config.json"
     if not os.path.exists(config_path):
         logger.info("配置文件不存在，将使用config-template.json模板")

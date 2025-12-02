@@ -26,6 +26,15 @@ class Reply:
     def __init__(self, type: ReplyType = None, content=None):
         self.type = type
         self.content = content
+        self.extra_replies = []
 
     def __str__(self):
         return "Reply(type={}, content={})".format(self.type, self.content)
+
+    def add_extra_reply(self, reply: "Reply"):
+        if isinstance(reply, Reply):
+            self.extra_replies.append(reply)
+
+    def add_extra_text(self, text: str):
+        if text:
+            self.extra_replies.append(Reply(ReplyType.TEXT, text))

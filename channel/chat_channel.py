@@ -289,6 +289,8 @@ class ChatChannel(Channel):
                 replies = self._split_reply_if_needed(reply)
                 for part in replies:
                     self._send(part, context)
+                for extra in getattr(reply, "extra_replies", []):
+                    self._send_reply(context, extra)
 
     def _send(self, reply: Reply, context: Context, retry_cnt=0):
         try:
@@ -389,33 +391,31 @@ class ChatChannel(Channel):
     def _split_reply_if_needed(self, reply: Reply):
         if reply.type != ReplyType.TEXT or not isinstance(reply.content, str):
             return [reply]
-        text = reply.content
-        limit = self._get_text_limit(text)
-        if len(text) <= limit:
+        parts = self._split_text_by_limit(reply.content, 10000)
+        if len(parts) == 1:
             return [reply]
-        parts = []
-        start = 0
-        text_len = len(text)
-        while start < text_len:
-            end = min(text_len, start + limit)
-            parts.append(text[start:end])
-            start = end
-        replies = []
-        for part in parts:
-            new_reply = Reply(reply.type, part)
-            replies.append(new_reply)
-        logger.info(f"[chat_channel] split reply into {len(replies)} parts due to length limit {limit}")
+        replies = [Reply(reply.type, part) for part in parts]
+        logger.info(f"[chat_channel] split reply into {len(replies)} parts due to length limit 10000/5000 chars")
         return replies
 
-    def _get_text_limit(self, text: str) -> int:
+    def _split_text_by_limit(self, text: str, limit: int) -> list:
         if not text:
-            return 5000
-        ascii_only = True
+            return [""]
+        parts = []
+        current = []
+        weight = 0
         for ch in text:
-            if ord(ch) > 127:
-                ascii_only = False
-                break
-        return 10000 if ascii_only else 5000
+            ch_weight = 1 if ord(ch) < 128 else 2
+            if weight + ch_weight > limit and current:
+                parts.append("".join(current))
+                current = [ch]
+                weight = ch_weight
+            else:
+                current.append(ch)
+                weight += ch_weight
+        if current:
+            parts.append("".join(current))
+        return parts
 
 
 def check_prefix(content, prefix_list):
